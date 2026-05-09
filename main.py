@@ -1,18 +1,19 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
 import models
 import schemas
+from fastapi.staticfiles import StaticFiles
 from database import engine, get_db, Base
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 import bcrypt
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from auth_utils import router as auth_router
-
+from voice_service import router as voice_router
 # Load environment variables
 load_dotenv()
 
@@ -22,7 +23,11 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="Dk Developers Invoice API", version="2.0.0")
 
 app.include_router(auth_router)
+app.include_router(voice_router)
 
+# CRITICAL: This serves the PDF files so Twilio can download them
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+app.mount("/static", StaticFiles(directory=CURRENT_DIR), name="static")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,6 +35,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/")
+async def root():
+    return {"message": "API is running. Please use /api/voice/whatsapp for Twilio webhooks."}
+
+@app.post("/")
+async def root_webhook(request: Request):
+    # This allows the short URL to work automatically!
+    from voice_service import whatsapp_webhook
+    return await whatsapp_webhook(request)
 
 # Auth Constants from .env
 SECRET_KEY = os.getenv("SECRET_KEY", "fallback_secret_for_dev")
@@ -122,13 +137,14 @@ def get_clients(current_user: models.User = Depends(get_current_user), db: Sessi
 @app.post("/clients")
 def create_client(client: schemas.ClientCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Check for duplicate client email under the same owner
-    existing_client = db.query(models.Client).filter(
-        models.Client.email == client.email, 
-        models.Client.owner_id == current_user.id
-    ).first()
-    
-    if existing_client:
-        raise HTTPException(status_code=400, detail="A client with this email already exists in your workspace.")
+    if client.email:
+        existing_client = db.query(models.Client).filter(
+            models.Client.email == client.email, 
+            models.Client.owner_id == current_user.id
+        ).first()
+        
+        if existing_client:
+            raise HTTPException(status_code=400, detail="A client with this email already exists in your workspace.")
 
     client_data = client.model_dump()
     client_data["owner_id"] = current_user.id

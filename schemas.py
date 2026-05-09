@@ -64,7 +64,7 @@ class InvoiceItem(InvoiceItemBase):
 # ============ CLIENT SCHEMAS ============
 class ClientBase(BaseModel):
     name: str
-    email: EmailStr
+    email: Optional[EmailStr] = None
     phone: Optional[str] = None
     address: Optional[str] = None
 

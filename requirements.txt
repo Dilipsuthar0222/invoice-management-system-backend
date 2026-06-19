@@ -10,3 +10,5 @@ fpdf
 fastapi-mail
 google-genai
 python-multipart
+stripe
+python-jose[cryptography]

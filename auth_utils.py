@@ -1,4 +1,8 @@
 import os
+import io
+import base64
+import pyotp
+import qrcode
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -13,6 +17,9 @@ import bcrypt
 
 # Load environment variables
 load_dotenv()
+
+# Dummy in-memory DB kept for visualization/reference
+dummy_2fa_db = {}
 
 # Re-use your hashing logic from main.py
 def get_password_hash(password: str):
@@ -122,3 +129,131 @@ async def send_invoice_email(
     fm = FastMail(conf)
     await fm.send_message(message)
     return {"message": "Invoice sent successfully to " + email}
+
+# --- ENDPOINT: 2FA SETUP ---
+@router.post("/2fa/setup")
+async def setup_2fa(request: schemas.TwoFASetupRequest, db: Session = Depends(get_db)):
+    email = request.email
+    
+    # 1. Check if user exists in our actual user DB
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found in system")
+        
+    # 2. Generate random base32 secret key
+    secret_key = pyotp.random_base32()
+    
+    # 3. Create TOTP provisioning URI
+    totp = pyotp.TOTP(secret_key)
+    provisioning_uri = totp.provisioning_uri(name=email, issuer_name="DK Developers")
+    
+    # 4. Generate QR Code Base64 image
+    qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(provisioning_uri)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    buffered = io.BytesIO()
+    img.save(buffered, format="PNG")
+    qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    
+    # 5. PERSIST IN REAL DATABASE
+    user.two_factor_secret = secret_key
+    user.is_2fa_enabled = False
+    db.commit()
+    
+    # 6. DUMMY DATABASE UPDATE
+    dummy_2fa_db[email] = {
+        "secret_key": secret_key,
+        "is_2fa_enabled": False
+    }
+    
+    print(f"\n--- REAL & DUMMY DB UPDATE FOR 2FA SETUP ---")
+    print(f"User: {email}")
+    print(f"Secret Key Saved to DB: {secret_key}")
+    print(f"Is 2FA Enabled Saved: False")
+    print(f"Current Dummy DB State: {dummy_2fa_db}")
+    print(f"--------------------------------------------\n")
+    
+    return {
+        "secret": secret_key,
+        "qr_code": f"data:image/png;base64,{qr_base64}"
+    }
+
+# --- ENDPOINT: 2FA VERIFY ---
+@router.post("/2fa/verify")
+async def verify_2fa(request: schemas.TwoFAVerifyRequest, db: Session = Depends(get_db)):
+    email = request.email
+    code = request.code
+    
+    # 1. Check if user is in our actual user DB
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found in system")
+        
+    # 2. Get secret key from the database
+    secret_key = user.two_factor_secret
+    if not secret_key:
+        raise HTTPException(
+            status_code=400, 
+            detail="2FA is not set up for this user. Please call /auth/2fa/setup first."
+        )
+        
+    # 3. Verify TOTP code
+    totp = pyotp.TOTP(secret_key)
+    is_valid = totp.verify(code)
+    
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="Invalid 2FA verification code")
+        
+    # 4. PERSIST IN REAL DATABASE
+    user.is_2fa_enabled = True
+    db.commit()
+    
+    # 5. DUMMY DATABASE UPDATE
+    dummy_2fa_db[email] = {
+        "secret_key": secret_key,
+        "is_2fa_enabled": True
+    }
+    
+    print(f"\n--- REAL & DUMMY DB UPDATE FOR 2FA VERIFY ---")
+    print(f"User: {email}")
+    print(f"Secret Key Verified: {secret_key}")
+    print(f"Is 2FA Enabled Updated to: True")
+    print(f"Current Dummy DB State: {dummy_2fa_db}")
+    print(f"---------------------------------------------\n")
+    
+    return {
+        "success": True,
+        "message": "Two-Factor Authentication verified and enabled successfully!"
+    }
+
+# --- ENDPOINT: 2FA DISABLE ---
+@router.post("/2fa/disable")
+async def disable_2fa(request: schemas.TwoFASetupRequest, db: Session = Depends(get_db)):
+    email = request.email
+    
+    # 1. Check if user exists in our actual user DB
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found in system")
+        
+    # 2. Persist in database
+    user.is_2fa_enabled = False
+    user.two_factor_secret = None
+    db.commit()
+    
+    # 3. Dummy DB sync
+    if email in dummy_2fa_db:
+        dummy_2fa_db[email]["is_2fa_enabled"] = False
+        dummy_2fa_db[email]["secret_key"] = None
+        
+    print(f"\n--- REAL & DUMMY DB UPDATE FOR 2FA DISABLE ---")
+    print(f"User: {email}")
+    print(f"Is 2FA Enabled Set to: False")
+    print(f"----------------------------------------------\n")
+        
+    return {
+        "success": True,
+        "message": "Two-Factor Authentication disabled successfully."
+    }

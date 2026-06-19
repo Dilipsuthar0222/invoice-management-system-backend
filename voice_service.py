@@ -29,6 +29,7 @@ twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_T
 @router.post("/api/voice/whatsapp")
 @router.post("/api/voice/whatsapp-voice")
 async def whatsapp_webhook(request: Request):
+    load_dotenv(override=True)
     try:
         form_data = await request.form()
     except:
@@ -140,7 +141,8 @@ async def whatsapp_webhook(request: Request):
         print(f"📄 PDF generated at: {pdf_path}")
 
         # 3. Construct URL
-        base_url = PUBLIC_URL.rstrip('/') if PUBLIC_URL else f"{request.url.scheme}://{request.headers.get('host')}".rstrip('/')
+        dynamic_public_url = os.getenv("PUBLIC_URL", "").strip()
+        base_url = dynamic_public_url.rstrip('/') if dynamic_public_url else f"{request.url.scheme}://{request.headers.get('host')}".rstrip('/')
         pdf_url = f"{base_url}/static/{filename}"
         
         print(f"📄 PDF generated at: {pdf_path}")

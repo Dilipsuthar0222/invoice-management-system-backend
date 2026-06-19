@@ -13,6 +13,8 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
     date_joined = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_2fa_enabled = Column(Boolean, default=False)
+    two_factor_secret = Column(String(255), nullable=True)
 
     # Real-world ownership links
     clients = relationship("Client", back_populates="owner")
@@ -84,3 +86,22 @@ class InvoiceItem(Base):
     total_price = Column(Numeric(10, 2), nullable=False)
     
     invoice = relationship("Invoice", back_populates="items")
+
+# ================= AGENCY SAFETY =================
+class AgencySafetyLink(Base):
+    __tablename__ = "agency_safety_links"
+    id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
+    secure_id = Column(String(50), unique=True, index=True, default=lambda: str(uuid.uuid4())[:12])
+    image_data = Column(Text(length=4294967295), nullable=False) # LONGTEXT for Base64 encoded image
+    watermark_text = Column(String(255), default="DRAFT - DO NOT USE")
+    opacity = Column(Integer, default=30)
+    date_created = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    
+    owner = relationship("User")
+    invoice = relationship("Invoice")
+
+    @property
+    def status(self):
+        return self.invoice.status if self.invoice else "Unpaid"

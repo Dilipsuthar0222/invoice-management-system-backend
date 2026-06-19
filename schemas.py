@@ -15,12 +15,16 @@ class UserResponse(UserBase):
     id: int
     is_active: bool
     date_joined: datetime
+    is_2fa_enabled: Optional[bool] = False
+    two_factor_secret: Optional[str] = None
     class Config:
         from_attributes = True
 
 class Token(BaseModel):
-    access_token: str
-    token_type: str
+    access_token: Optional[str] = None
+    token_type: Optional[str] = None
+    require_2fa: Optional[bool] = None
+    email: Optional[str] = None
 
 class TokenData(BaseModel):
     email: Optional[str] = None
@@ -108,3 +112,30 @@ class ResetPasswordRequest(BaseModel):
     """Schema for the final password reset using the token."""
     token: str
     new_password: str = Field(..., min_length=8, max_length=72)
+
+# ============ AGENCY SAFETY SCHEMAS ============
+class AgencySafetyCreate(BaseModel):
+    image_data: str
+    watermark_text: Optional[str] = "DRAFT - DO NOT USE"
+    opacity: Optional[int] = 30
+    invoice_id: Optional[int] = None
+
+class AgencySafetyResponse(BaseModel):
+    id: int
+    secure_id: str
+    image_data: str
+    watermark_text: str
+    opacity: int
+    invoice_id: Optional[int]
+    status: str = "Unpaid"
+
+    class Config:
+        from_attributes = True
+
+# ============ 2FA SCHEMAS ============
+class TwoFASetupRequest(BaseModel):
+    email: EmailStr
+
+class TwoFAVerifyRequest(BaseModel):
+    email: EmailStr
+    code: str

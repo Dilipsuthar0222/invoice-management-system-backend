@@ -12,3 +12,4 @@ google-genai
 python-multipart
 stripe
 python-jose[cryptography]
+pyotp
